@@ -219,6 +219,7 @@ public class NeoStoreDataSource extends LifecycleAdapter
     private final VersionContextSupplier versionContextSupplier;
     private final AccessCapability accessCapability;
 
+
     private StorageEngine storageEngine;
     private QueryExecutionEngine executionEngine;
     private NeoStoreTransactionLogModule transactionLogModule;
@@ -359,7 +360,11 @@ public class NeoStoreDataSource extends LifecycleAdapter
                     versionContextSupplier );
             life.add( logFiles );
 
+            CoreBuildStore coreBuildStore = new CoreBuildStore();
+
             TransactionIdStore transactionIdStore = dataSourceDependencies.resolveDependency( TransactionIdStore.class );
+            coreBuildStore.setTransactionIdStore(transactionIdStore);
+
 
             versionContextSupplier.init( transactionIdStore::getLastClosedTransactionId );
 
@@ -369,12 +374,11 @@ public class NeoStoreDataSource extends LifecycleAdapter
             transactionLogModule.satisfyDependencies( dataSourceDependencies );
 
             buildRecovery( fs,
-                    transactionIdStore,
+                    coreBuildStore,
                     tailScanner,
                     monitors.newMonitor( RecoveryMonitor.class ),
                     monitors.newMonitor( RecoveryStartInformationProvider.Monitor.class ),
-                    logFiles,
-                    storageEngine, transactionLogModule.logicalTransactionStore(), logVersionRepository
+                    transactionLogModule.logicalTransactionStore(), logVersionRepository
             );
 
             // At the time of writing this comes from the storage engine (IndexStoreView)
@@ -561,18 +565,16 @@ public class NeoStoreDataSource extends LifecycleAdapter
 
     private void buildRecovery(
             final FileSystemAbstraction fileSystemAbstraction,
-            TransactionIdStore transactionIdStore,
+            CoreBuildStore coreBuildStore,
             LogTailScanner tailScanner,
             RecoveryMonitor recoveryMonitor,
             RecoveryStartInformationProvider.Monitor positionMonitor,
-            final LogFiles logFiles,
-            StorageEngine storageEngine,
             LogicalTransactionStore logicalTransactionStore,
             LogVersionRepository logVersionRepository )
     {
-        RecoveryService recoveryService = new DefaultRecoveryService( storageEngine, tailScanner, transactionIdStore,
+        RecoveryService recoveryService = new DefaultRecoveryService( coreBuildStore.getStorageEngine(), tailScanner, coreBuildStore.getTransactionIdStore(),
                 logicalTransactionStore, logVersionRepository, positionMonitor );
-        CorruptedLogsTruncator logsTruncator = new CorruptedLogsTruncator( databaseLayout.databaseDirectory(), logFiles, fileSystemAbstraction );
+        CorruptedLogsTruncator logsTruncator = new CorruptedLogsTruncator( databaseLayout.databaseDirectory(), coreBuildStore.getLogFiles(), fileSystemAbstraction );
         ProgressReporter progressReporter = new LogProgressReporter( logService.getInternalLog( Recovery.class ) );
         Recovery recovery = new Recovery( recoveryService, logsTruncator, recoveryMonitor, progressReporter, failOnCorruptedLogFiles );
         life.add( recovery );
