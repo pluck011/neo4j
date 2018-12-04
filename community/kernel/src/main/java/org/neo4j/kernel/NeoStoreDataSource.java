@@ -345,7 +345,7 @@ public class NeoStoreDataSource extends LifecycleAdapter
         upgradeStore( formats, tailScanner );
 
         // Build all modules and their services
-        StorageEngine storageEngine = null;
+        storageEngine = null;
         try
         {
             DatabaseSchemaState databaseSchemaState = new DatabaseSchemaState( logProvider );
@@ -364,13 +364,17 @@ public class NeoStoreDataSource extends LifecycleAdapter
 
             TransactionIdStore transactionIdStore = dataSourceDependencies.resolveDependency( TransactionIdStore.class );
             coreBuildStore.setTransactionIdStore(transactionIdStore);
-
+            coreBuildStore.setStorageEngine(storageEngine);
+            coreBuildStore.setLogFiles(logFiles);
 
             versionContextSupplier.init( transactionIdStore::getLastClosedTransactionId );
 
+            coreBuildStore.setTransactionIdStore(transactionIdStore);
+
             LogVersionRepository logVersionRepository = dataSourceDependencies.resolveDependency( LogVersionRepository.class );
-            NeoStoreTransactionLogModule transactionLogModule = buildTransactionLogs( logFiles, config, logProvider,
-                    scheduler, storageEngine, logEntryReader, explicitIndexTransactionOrdering, transactionIdStore );
+
+            transactionLogModule = buildTransactionLogs(coreBuildStore, config, logProvider,
+                    scheduler, logEntryReader, explicitIndexTransactionOrdering);
             transactionLogModule.satisfyDependencies( dataSourceDependencies );
 
             buildRecovery( fs,
@@ -384,23 +388,17 @@ public class NeoStoreDataSource extends LifecycleAdapter
             // At the time of writing this comes from the storage engine (IndexStoreView)
             NodePropertyAccessor nodePropertyAccessor = dataSourceDependencies.resolveDependency( NodePropertyAccessor.class );
 
-            final NeoStoreKernelModule kernelModule = buildKernel(
-                    logFiles,
+            kernelModule = buildKernel(
+                    coreBuildStore,
                     transactionLogModule.transactionAppender(),
                     dataSourceDependencies.resolveDependency( IndexingService.class ),
                     databaseSchemaState,
                     dataSourceDependencies.resolveDependency( LabelScanStore.class ),
-                    storageEngine,
                     indexConfigStore,
-                    transactionIdStore, databaseAvailabilityGuard,
+                    databaseAvailabilityGuard,
                     clock, nodePropertyAccessor );
 
             kernelModule.satisfyDependencies( dataSourceDependencies );
-
-            // Do these assignments last so that we can ensure no cyclical dependencies exist
-            this.storageEngine = storageEngine;
-            this.transactionLogModule = transactionLogModule;
-            this.kernelModule = kernelModule;
 
             dataSourceDependencies.satisfyDependency( this );
             dataSourceDependencies.satisfyDependency( databaseSchemaState );
@@ -522,10 +520,10 @@ public class NeoStoreDataSource extends LifecycleAdapter
         return life.add( storageEngine );
     }
 
-    private NeoStoreTransactionLogModule buildTransactionLogs( LogFiles logFiles, Config config,
-            LogProvider logProvider, JobScheduler scheduler, StorageEngine storageEngine,
+    private NeoStoreTransactionLogModule buildTransactionLogs( CoreBuildStore coreBuildStore, Config config,
+            LogProvider logProvider, JobScheduler scheduler,
             LogEntryReader<ReadableClosablePositionAwareChannel> logEntryReader,
-            SynchronizedArrayIdOrderingQueue explicitIndexTransactionOrdering, TransactionIdStore transactionIdStore )
+            SynchronizedArrayIdOrderingQueue explicitIndexTransactionOrdering)
     {
         TransactionMetadataCache transactionMetadataCache = new TransactionMetadataCache();
         if ( config.get( GraphDatabaseSettings.ephemeral ) )
@@ -534,22 +532,22 @@ public class NeoStoreDataSource extends LifecycleAdapter
         }
 
         final LogPruning logPruning =
-                new LogPruningImpl( fs, logFiles, logProvider, new LogPruneStrategyFactory(), clock, config );
+                new LogPruningImpl( fs, coreBuildStore.getLogFiles(), logProvider, new LogPruneStrategyFactory(), clock, config );
 
         final LogRotation logRotation =
-                new LogRotationImpl( monitors.newMonitor( LogRotation.Monitor.class ), logFiles, databaseHealth );
+                new LogRotationImpl( monitors.newMonitor( LogRotation.Monitor.class ), coreBuildStore.getLogFiles(), databaseHealth );
 
         final TransactionAppender appender = life.add( new BatchingTransactionAppender(
-                logFiles, logRotation, transactionMetadataCache, transactionIdStore, explicitIndexTransactionOrdering,
+                coreBuildStore.getLogFiles(), logRotation, transactionMetadataCache, coreBuildStore.getTransactionIdStore(), explicitIndexTransactionOrdering,
                 databaseHealth ) );
         final LogicalTransactionStore logicalTransactionStore =
-                new PhysicalLogicalTransactionStore( logFiles, transactionMetadataCache, logEntryReader, monitors,
+                new PhysicalLogicalTransactionStore(coreBuildStore.getLogFiles(), transactionMetadataCache, logEntryReader, monitors,
                         failOnCorruptedLogFiles );
 
         CheckPointThreshold threshold = CheckPointThreshold.createThreshold( config, clock, logPruning, logProvider );
 
         final CheckPointerImpl checkPointer = new CheckPointerImpl(
-                transactionIdStore, threshold, storageEngine, logPruning, appender, databaseHealth, logProvider,
+                coreBuildStore.getTransactionIdStore(), threshold, coreBuildStore.getStorageEngine(), logPruning, appender, databaseHealth, logProvider,
                 tracers.checkPointTracer, ioLimiter, storeCopyCheckPointMutex );
 
         long recurringPeriod = threshold.checkFrequencyMillis();
@@ -559,7 +557,7 @@ public class NeoStoreDataSource extends LifecycleAdapter
         life.add( checkPointer );
         life.add( checkPointScheduler );
 
-        return new NeoStoreTransactionLogModule( logicalTransactionStore, logFiles,
+        return new NeoStoreTransactionLogModule( logicalTransactionStore, coreBuildStore.getLogFiles(),
                 logRotation, checkPointer, appender, explicitIndexTransactionOrdering );
     }
 
@@ -580,10 +578,9 @@ public class NeoStoreDataSource extends LifecycleAdapter
         life.add( recovery );
     }
 
-    private NeoStoreKernelModule buildKernel( LogFiles logFiles, TransactionAppender appender,
+    private NeoStoreKernelModule buildKernel( CoreBuildStore coreBuildStore, TransactionAppender appender,
             IndexingService indexingService, DatabaseSchemaState databaseSchemaState, LabelScanStore labelScanStore,
-            StorageEngine storageEngine, IndexConfigStore indexConfigStore, TransactionIdStore transactionIdStore,
-            AvailabilityGuard databaseAvailabilityGuard, SystemNanoClock clock, NodePropertyAccessor nodePropertyAccessor )
+            IndexConfigStore indexConfigStore, AvailabilityGuard databaseAvailabilityGuard, SystemNanoClock clock, NodePropertyAccessor nodePropertyAccessor )
     {
         AtomicReference<CpuClock> cpuClockRef = setupCpuClockAtomicReference();
         AtomicReference<HeapAllocation> heapAllocationRef = setupHeapAllocationAtomicReference();
@@ -611,7 +608,7 @@ public class NeoStoreDataSource extends LifecycleAdapter
         KernelTransactions kernelTransactions = life.add(
                 new KernelTransactions( config, statementLocksFactory, constraintIndexCreator, statementOperationParts, schemaWriteGuard,
                         transactionHeaderInformationFactory, transactionCommitProcess, auxTxStateManager, hooks,
-                        transactionMonitor, databaseAvailabilityGuard, tracers, storageEngine, procedures, transactionIdStore, clock, cpuClockRef,
+                        transactionMonitor, databaseAvailabilityGuard, tracers, storageEngine, procedures, coreBuildStore.getTransactionIdStore(), clock, cpuClockRef,
                         heapAllocationRef, accessCapability, autoIndexing, explicitIndexStore, versionContextSupplier, collectionsFactorySupplier,
                         constraintSemantics, databaseSchemaState, indexingService, tokenHolders, getDatabaseName(), dataSourceDependencies ) );
 
@@ -623,7 +620,7 @@ public class NeoStoreDataSource extends LifecycleAdapter
         kernel.registerTransactionHook( transactionEventHandlers );
         life.add( kernel );
 
-        final NeoStoreFileListing fileListing = new NeoStoreFileListing( databaseLayout, logFiles, labelScanStore,
+        final NeoStoreFileListing fileListing = new NeoStoreFileListing( databaseLayout, coreBuildStore.getLogFiles(), labelScanStore,
                 indexingService, explicitIndexProvider, storageEngine );
         dataSourceDependencies.satisfyDependency( fileListing );
 
@@ -791,9 +788,6 @@ public class NeoStoreDataSource extends LifecycleAdapter
 
     private void clearTransactions()
     {
-        // We don't want to have buffered ids carry over to the new role
-        storageEngine.clearBufferedIds();
-
         // Get rid of all pooled transactions, as they will otherwise reference
         // components that have been swapped out during the mode switch.
         kernelModule.kernelTransactions().disposeAll();
@@ -805,7 +799,6 @@ public class NeoStoreDataSource extends LifecycleAdapter
      */
     public void afterModeSwitch()
     {
-        storageEngine.loadSchemaCache();
         clearTransactions();
     }
 

@@ -31,4 +31,12 @@ public class CoreBuildStore {
     public void setTransactionIdStore(TransactionIdStore transactionIdStore) {
         this.transactionIdStore = transactionIdStore;
     }
+
+    public void setStorageEngine(StorageEngine storageEngine) {
+        this.storageEngine = storageEngine;
+    }
+
+    public void setLogFiles(LogFiles logFiles) {
+        this.logFiles = logFiles;
+    }
 }
