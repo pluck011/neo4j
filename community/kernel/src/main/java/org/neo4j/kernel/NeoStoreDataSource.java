@@ -360,16 +360,11 @@ public class NeoStoreDataSource extends LifecycleAdapter
                     versionContextSupplier );
             life.add( logFiles );
 
-            CoreBuildStore coreBuildStore = new CoreBuildStore();
-
             TransactionIdStore transactionIdStore = dataSourceDependencies.resolveDependency( TransactionIdStore.class );
-            coreBuildStore.setTransactionIdStore(transactionIdStore);
-            coreBuildStore.setStorageEngine(storageEngine);
-            coreBuildStore.setLogFiles(logFiles);
 
-            versionContextSupplier.init( transactionIdStore::getLastClosedTransactionId );
+            CoreBuildStore coreBuildStore = new CoreBuildStore(transactionIdStore, storageEngine, logFiles, versionContextSupplier);
 
-            coreBuildStore.setTransactionIdStore(transactionIdStore);
+            coreBuildStore.initializeVersionContextSupplier();
 
             LogVersionRepository logVersionRepository = dataSourceDependencies.resolveDependency( LogVersionRepository.class );
 
@@ -475,7 +470,7 @@ public class NeoStoreDataSource extends LifecycleAdapter
     }
 
     private static RecordFormats selectStoreFormats( Config config, DatabaseLayout databaseLayout, FileSystemAbstraction fs, PageCache pageCache,
-            LogService logService )
+                                                     LogService logService )
     {
         LogProvider logging = logService.getInternalLogProvider();
         RecordFormats formats = RecordFormatSelector.selectNewestFormat( config, databaseLayout, fs, pageCache, logging );
@@ -521,9 +516,9 @@ public class NeoStoreDataSource extends LifecycleAdapter
     }
 
     private NeoStoreTransactionLogModule buildTransactionLogs( CoreBuildStore coreBuildStore, Config config,
-            LogProvider logProvider, JobScheduler scheduler,
-            LogEntryReader<ReadableClosablePositionAwareChannel> logEntryReader,
-            SynchronizedArrayIdOrderingQueue explicitIndexTransactionOrdering)
+                                                               LogProvider logProvider, JobScheduler scheduler,
+                                                               LogEntryReader<ReadableClosablePositionAwareChannel> logEntryReader,
+                                                               SynchronizedArrayIdOrderingQueue explicitIndexTransactionOrdering)
     {
         TransactionMetadataCache transactionMetadataCache = new TransactionMetadataCache();
         if ( config.get( GraphDatabaseSettings.ephemeral ) )
@@ -579,8 +574,8 @@ public class NeoStoreDataSource extends LifecycleAdapter
     }
 
     private NeoStoreKernelModule buildKernel( CoreBuildStore coreBuildStore, TransactionAppender appender,
-            IndexingService indexingService, DatabaseSchemaState databaseSchemaState, LabelScanStore labelScanStore,
-            IndexConfigStore indexConfigStore, AvailabilityGuard databaseAvailabilityGuard, SystemNanoClock clock, NodePropertyAccessor nodePropertyAccessor )
+                                              IndexingService indexingService, DatabaseSchemaState databaseSchemaState, LabelScanStore labelScanStore,
+                                              IndexConfigStore indexConfigStore, AvailabilityGuard databaseAvailabilityGuard, SystemNanoClock clock, NodePropertyAccessor nodePropertyAccessor )
     {
         AtomicReference<CpuClock> cpuClockRef = setupCpuClockAtomicReference();
         AtomicReference<HeapAllocation> heapAllocationRef = setupHeapAllocationAtomicReference();
@@ -768,7 +763,7 @@ public class NeoStoreDataSource extends LifecycleAdapter
     }
 
     private StatementOperationParts buildStatementOperations( AtomicReference<CpuClock> cpuClockRef,
-            AtomicReference<HeapAllocation> heapAllocationRef )
+                                                              AtomicReference<HeapAllocation> heapAllocationRef )
     {
         QueryRegistrationOperations queryRegistrationOperations =
                 new StackingQueryRegistrationOperations( clock, cpuClockRef, heapAllocationRef );
