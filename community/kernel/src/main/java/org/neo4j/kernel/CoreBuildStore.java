@@ -30,19 +30,19 @@ public class CoreBuildStore {
         return logFiles;
     }
 
-    public void setTransactionIdStore(TransactionIdStore transactionIdStore) {
+    public void setTransactionIdStore( TransactionIdStore transactionIdStore ) {
         this.transactionIdStore = transactionIdStore;
     }
 
-    public void setStorageEngine(StorageEngine storageEngine) {
+    public void setStorageEngine( StorageEngine storageEngine ) {
         this.storageEngine = storageEngine;
     }
 
-    public void setLogFiles(LogFiles logFiles) {
+    public void setLogFiles( LogFiles logFiles ) {
         this.logFiles = logFiles;
     }
 
     public void initializeVersionContextSupplier() {
-        versionContextSupplier.init(transactionIdStore::getLastClosedTransactionId);
+        versionContextSupplier.init( transactionIdStore::getLastClosedTransactionId );
     }
 }
